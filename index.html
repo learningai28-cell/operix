@@ -2057,6 +2057,32 @@ showLanding();
 // ── Live Quote Tracker ──────────────────────────────────────────────────────
 var TRACKER_CSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTaOD0o55AAqhXk5KwHdDIUy30ncDdJRtTssk9qdzcIG_jSl6okeBFNC15biMgDuudGqY_ViehcdeEs/pub?gid=0&single=true&output=csv";
 
+// Proper CSV parser — handles quoted fields containing commas
+function parseCSV(str) {
+  var rows = [];
+  var lines = str.split('\n');
+  lines.forEach(function(line) {
+    if (!line.trim()) return;
+    var row = [];
+    var cur = '';
+    var inQuotes = false;
+    for (var i = 0; i < line.length; i++) {
+      var ch = line[i];
+      if (ch === '"') {
+        if (inQuotes && line[i+1] === '"') { cur += '"'; i++; }
+        else inQuotes = !inQuotes;
+      } else if (ch === ',' && !inQuotes) {
+        row.push(cur.trim()); cur = '';
+      } else {
+        cur += ch;
+      }
+    }
+    row.push(cur.trim());
+    rows.push(row);
+  });
+  return rows;
+}
+
 async function loadQuoteTracker() {
   var status = document.getElementById('tracker-status');
   var body = document.getElementById('tracker-body');
@@ -2074,9 +2100,7 @@ async function loadQuoteTracker() {
     }
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     var text = await resp.text();
-    var rows = text.trim().split('\n').map(function(r){
-      return r.split(',').map(function(c){ return c.replace(/^"|"$/g,'').trim(); });
-    });
+    var rows = parseCSV(text);
     if (rows.length <= 1) {
       body.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text3);font-size:12px;">No responses yet. Waiting for vendors...</div>';
       if (status) { status.textContent = '0 responses'; status.style.color = 'var(--text3)'; }
@@ -2105,15 +2129,50 @@ async function loadQuoteTracker() {
     // Store globally
     window._trackerRFQMap = rfqMap;
     window._trackerData = data;
-    // Build item map from sheet column N (index 13) — source of truth for product names
+    // Build item map — find Item column by header name
+    var headerRow = rows[0] || [];
+    var itemColIndex = -1;
+    var evalStatusColIndex = 12; // Column M default
+    for (var ci = 0; ci < headerRow.length; ci++) {
+      var hdr = headerRow[ci].toLowerCase().trim();
+      if (hdr === 'item') itemColIndex = ci;
+      if (hdr === 'evaluation status') evalStatusColIndex = ci;
+    }
+    if (itemColIndex < 0) itemColIndex = 13; // Column N fallback
+    window._itemColIndex = itemColIndex;
+
+    // Build closed RFQ set from sheet evaluation status
+    var sheetClosedRFQs = {};
+    data.forEach(function(row) {
+      var rfq = (row[0]||'').trim();
+      var evalStatus = (row[evalStatusColIndex]||'').toLowerCase().trim();
+      if (rfq && evalStatus === 'closed') sheetClosedRFQs[rfq] = true;
+    });
+    window._sheetClosedRFQs = sheetClosedRFQs;
+
     var sheetItemMap = {};
     data.forEach(function(row) {
       var rfq = (row[0]||'').trim();
-      var item = (row[13]||'').trim(); // Column N = Item
-      if (rfq && item && !sheetItemMap[rfq]) sheetItemMap[rfq] = item;
+      var item = (row[itemColIndex]||'').trim();
+      // Skip status values
+      if (item && !/^(received|pending|evaluation|closed|open|active)$/i.test(item)) {
+        if (rfq && !sheetItemMap[rfq]) sheetItemMap[rfq] = item;
+      }
     });
     window._sheetItemMap = sheetItemMap;
     renderTrackerFromCache();
+}
+
+// Central helper — RFQ is closed if in local history OR flagged in sheet
+function isClosedRFQ(rfqNum) {
+  var inHistory = !!(_rfqHistory||[]).find(function(r){ return r.num === rfqNum; });
+  var inSheet = !!(window._sheetClosedRFQs||{})[rfqNum];
+  return inHistory || inSheet;
+}
+
+function getClosedRFQEntry(rfqNum) {
+  return (_rfqHistory||[]).find(function(r){ return r.num === rfqNum; }) || null;
+}
   } catch(e) {
     if (body) body.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text3);font-size:12px;">Unable to load. Check connection.</div>';
     if (status) { status.textContent = 'Error'; status.style.color = 'var(--red)'; }
@@ -2149,7 +2208,7 @@ function renderTrackerFromCache() {
     var prevRFQ = rfqFilterEl.value;
     rfqFilterEl.innerHTML = '<option value="all">All RFQs (' + allRFQs.length + ')</option>';
     allRFQs.forEach(function(rfq) {
-      var isClosed = !!(_rfqHistory||[]).find(function(r){ return r.num === rfq; });
+      var isClosed = isClosedRFQ(rfq);
       var count = rfqMap[rfq].length;
       var opt = document.createElement('option');
       opt.value = rfq;
@@ -2196,7 +2255,7 @@ function renderTrackerFromCache() {
       var item = (rfqProductMap[rfq] || '').toLowerCase();
       if (item !== productFilter.toLowerCase()) return false;
     }
-    var isClosed = !!(_rfqHistory||[]).find(function(r){ return r.num === rfq; });
+    var isClosed = isClosedRFQ(rfq);
     if (statusFilter === 'active' && isClosed) return false;
     if (statusFilter === 'closed' && !isClosed) return false;
     return true;
@@ -2206,7 +2265,7 @@ function renderTrackerFromCache() {
   if (summaryRow) {
     summaryRow.style.display = allRFQs.length > 0 ? 'flex' : 'none';
     summaryRow.innerHTML = allRFQs.map(function(rfq) {
-      var isClosed = !!(_rfqHistory||[]).find(function(r){ return r.num === rfq; });
+      var isClosed = isClosedRFQ(rfq);
       var count = rfqMap[rfq].length;
       var isSelected = rfqFilter === rfq;
       var bg = isSelected ? (isClosed ? 'rgba(42,168,155,0.28)' : 'rgba(244,162,97,0.25)') : (isClosed ? 'rgba(42,168,155,0.10)' : 'rgba(244,162,97,0.08)');
@@ -2232,7 +2291,8 @@ function renderTrackerFromCache() {
   var html = '';
   rfqsToShow.forEach(function(rfq, idx) {
     var responses = rfqMap[rfq];
-    var isClosed = (_rfqHistory||[]).find(function(r){ return r.num === rfq; });
+    var isClosed = isClosedRFQ(rfq);
+    var closedEntry = getClosedRFQEntry(rfq); // has awardedVendor if closed locally
     var rfqItem = rfqProductMap[rfq] || '';
     var accentColor = isClosed ? 'var(--em)' : 'var(--amber)';
 
@@ -2246,7 +2306,8 @@ function renderTrackerFromCache() {
       html += '<span style="background:var(--bg3);border:1px solid var(--border);border-radius:4px;padding:2px 8px;font-size:11px;color:var(--text2);">&#128230; ' + rfqItem + '</span>';
     }
     if (isClosed) {
-      html += '<span style="background:rgba(42,168,155,0.12);border:1px solid rgba(42,168,155,0.3);border-radius:20px;padding:2px 10px;font-size:10px;color:var(--em);">&#10003; CLOSED &middot; ' + (isClosed.awardedVendor||'—') + '</span>';
+      var awardedLabel = closedEntry ? (closedEntry.awardedVendor||'—') : 'Closed';
+      html += '<span style="background:rgba(42,168,155,0.12);border:1px solid rgba(42,168,155,0.3);border-radius:20px;padding:2px 10px;font-size:10px;color:var(--em);">&#10003; CLOSED &middot; ' + awardedLabel + '</span>';
     } else {
       html += '<span style="background:rgba(244,162,97,0.08);border:1px solid rgba(244,162,97,0.25);border-radius:20px;padding:2px 10px;font-size:10px;color:var(--amber);">&#9679; ACTIVE &middot; ' + responses.length + ' quote' + (responses.length!==1?'s':'') + '</span>';
     }
@@ -2320,7 +2381,8 @@ var _origShowPageTracker = window.showPage;
 window.showPage = function(name) {
   _origShowPageTracker(name);
   if (name === 'rfq') { renderActiveRFQs(); setTimeout(loadQuoteTracker, 400); }
-  if (name === 'bideval') { populateBidEvalDropdown(); }
+  // Note: bideval dropdown is populated by evaluateRFQ directly, not here
+  // to avoid reset loop when switching RFQs
 };
 
 // Refresh every 2 minutes
@@ -3026,7 +3088,7 @@ window.renderVendors = function() {
 // ── Bid Evaluation RFQ Dropdown ──────────────────────────────────────────────
 var _bidevAlRFQs = [];
 
-function populateBidEvalDropdown(filterProduct) {
+function populateBidEvalDropdown(filterProduct, selectRFQ) {
   var sel = document.getElementById('bideval-rfq-select');
   var prodSel = document.getElementById('bideval-product-filter');
   if (!sel) return;
@@ -3086,7 +3148,12 @@ function populateBidEvalDropdown(filterProduct) {
     opt.text = rfq.num + (itemLabel ? ' · ' + itemLabel.substring(0,25) : '') + closedTag;
     sel.appendChild(opt);
   });
-  if (prev) sel.value = prev;
+  // Set selection: explicit selectRFQ wins, then restored prev, then first option
+  if (selectRFQ) {
+    sel.value = selectRFQ;
+  } else if (prev && sel.querySelector('option[value="'+prev+'"]')) {
+    sel.value = prev;
+  }
 }
 
 function filterBidEvalByProduct(product) {
@@ -3112,15 +3179,14 @@ function evaluateRFQ(rfqNum) {
   var cur = document.querySelector('.page.active');
   if (!cur || cur.id !== 'page-bideval') showPage('bideval');
 
-  populateBidEvalDropdown();
-  var sel = document.getElementById('bideval-rfq-select');
-  if (sel) sel.value = rfqNum;
+  // Populate dropdown and set value atomically — pass rfqNum to pre-select it
+  populateBidEvalDropdown(null, rfqNum);
 
-  // Check if closed
-  var histEntry = (_rfqHistory || []).find(function(r){ return r.num === rfqNum; });
+  // Check if closed — use central helper (checks both localStorage AND sheet)
+  var histEntry = getClosedRFQEntry(rfqNum);
   var activeEntry = (_activeRFQs || []).find(function(r){ return r.num === rfqNum; });
   var rfqEntry = histEntry || activeEntry;
-  var isClosed = !!histEntry;
+  var isClosed = isClosedRFQ(rfqNum);
 
   var rfqMap = window._trackerRFQMap || {};
   var responses = rfqMap[rfqNum] || [];
@@ -3826,9 +3892,4 @@ function toggleFloatBtn(visible) {
 
 </body>
 </html>
-<script>
-// Run after all DOM + scripts are ready — restore persisted RFQs into table
-document.addEventListener('DOMContentLoaded', function() {
-  renderActiveRFQs();
-});
-</script>
+
