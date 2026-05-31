@@ -1272,17 +1272,43 @@ nav {
           </div>
 
           <div class="card" style="margin-top:16px;" id="live-tracker-card">
-            <div class="card-header">
-              <div class="card-title">Live quote tracker</div>
-              <div style="display:flex;align-items:center;gap:8px;">
+            <!-- Header -->
+            <div class="card-header" style="flex-wrap:wrap;gap:8px;">
+              <div style="display:flex;align-items:center;gap:10px;flex:1;min-width:0;">
+                <div class="card-title">Live quote tracker</div>
                 <span id="tracker-status" style="font-size:11px;color:var(--text3);">Loading...</span>
-                <button onclick="loadQuoteTracker()" style="font-size:11px;padding:3px 10px;" class="btn-secondary">Refresh</button>
               </div>
+              <button onclick="loadQuoteTracker()" style="font-size:11px;padding:4px 12px;" class="btn-secondary">&#8635; Refresh</button>
             </div>
-            <div class="card-body" id="tracker-body">
-              <div style="text-align:center;padding:24px 0;color:var(--text3);font-size:12px;">
-                Loading live data...
+            <!-- Filter bar -->
+            <div style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+              <div style="display:flex;flex-direction:column;gap:2px;">
+                <label style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;">Filter by RFQ</label>
+                <select id="tracker-rfq-filter" class="form-select" style="font-size:12px;width:220px;padding:4px 10px;" onchange="renderTrackerFromCache()">
+                  <option value="all">All RFQs</option>
+                </select>
               </div>
+              <div style="display:flex;flex-direction:column;gap:2px;">
+                <label style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;">Filter by Product</label>
+                <select id="tracker-product-filter" class="form-select" style="font-size:12px;width:220px;padding:4px 10px;" onchange="renderTrackerFromCache()">
+                  <option value="all">All Products</option>
+                </select>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:2px;">
+                <label style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;">Status</label>
+                <select id="tracker-status-filter" class="form-select" style="font-size:12px;width:140px;padding:4px 10px;" onchange="renderTrackerFromCache()">
+                  <option value="all">All</option>
+                  <option value="active">Active only</option>
+                  <option value="closed">Closed only</option>
+                </select>
+              </div>
+              <button onclick="document.getElementById('tracker-rfq-filter').value='all';document.getElementById('tracker-product-filter').value='all';document.getElementById('tracker-status-filter').value='all';renderTrackerFromCache();" style="font-size:11px;padding:4px 10px;margin-top:14px;" class="btn-secondary">Clear</button>
+            </div>
+            <!-- Quick RFQ pills -->
+            <div id="tracker-summary-row" style="padding:8px 16px;border-bottom:1px solid var(--border);display:none;flex-wrap:wrap;gap:6px;"></div>
+            <!-- Body -->
+            <div id="tracker-body" style="padding:0;">
+              <div style="text-align:center;padding:24px 0;color:var(--text3);font-size:12px;">Loading live data...</div>
             </div>
           </div>
         </div>
@@ -2023,23 +2049,31 @@ showLanding();
 var TRACKER_CSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTaOD0o55AAqhXk5KwHdDIUy30ncDdJRtTssk9qdzcIG_jSl6okeBFNC15biMgDuudGqY_ViehcdeEs/pub?gid=0&single=true&output=csv";
 
 async function loadQuoteTracker() {
-  var body = document.getElementById('tracker-body');
   var status = document.getElementById('tracker-status');
+  var body = document.getElementById('tracker-body');
   if (!body) return;
-  status.textContent = 'Refreshing...';
-  status.style.color = 'var(--amber)';
+  if (status) { status.textContent = 'Refreshing...'; status.style.color = 'var(--amber)'; }
   try {
-    var resp = await fetch(TRACKER_CSV + '&t=' + Date.now());
+    var url = TRACKER_CSV + '&t=' + Date.now();
+    var resp;
+    try {
+      // Try direct fetch first
+      resp = await fetch(url, { mode: 'cors', cache: 'no-store' });
+    } catch(e) {
+      // Fallback: use allorigins CORS proxy
+      resp = await fetch('https://api.allorigins.win/raw?url=' + encodeURIComponent(TRACKER_CSV));
+    }
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
     var text = await resp.text();
     var rows = text.trim().split('\n').map(function(r){
       return r.split(',').map(function(c){ return c.replace(/^"|"$/g,'').trim(); });
     });
     if (rows.length <= 1) {
       body.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text3);font-size:12px;">No responses yet. Waiting for vendors...</div>';
-      status.textContent = '0 responses'; status.style.color = 'var(--text3)'; return;
+      if (status) { status.textContent = '0 responses'; status.style.color = 'var(--text3)'; }
+      return;
     }
     var data = rows.slice(1).filter(function(r){
-      // Only include rows where column A looks like a valid RFQ number (RFQ-YYYYMMDD-NNN)
       var rfqNum = (r[0] || '').trim();
       return rfqNum && /^RFQ-\d{8}-\d{3,}$/i.test(rfqNum);
     });
@@ -2049,94 +2083,212 @@ async function loadQuoteTracker() {
       if (!rfqMap[rfq]) rfqMap[rfq] = [];
       rfqMap[rfq].push(row);
     });
-
-    // Deduplicate: keep only the LATEST row per vendor per RFQ
+    // Deduplicate: keep latest row per vendor per RFQ
     Object.keys(rfqMap).forEach(function(rfq) {
-      var rows = rfqMap[rfq];
       var vendorMap = {};
-      rows.forEach(function(row) {
-        var vendorKey = (row[2] || row[1] || '').toLowerCase().trim(); // vendor name or email
-        var recvTime = new Date(row[10] || 0).getTime();
-        if (!vendorMap[vendorKey] || recvTime > new Date(vendorMap[vendorKey][10] || 0).getTime()) {
-          vendorMap[vendorKey] = row;
-        }
+      rfqMap[rfq].forEach(function(row) {
+        var key = (row[2] || row[1] || '').toLowerCase().trim();
+        var t = new Date(row[10] || 0).getTime();
+        if (!vendorMap[key] || t > new Date(vendorMap[key][10] || 0).getTime()) vendorMap[key] = row;
       });
       rfqMap[rfq] = Object.values(vendorMap);
     });
+    // Store globally
+    window._trackerRFQMap = rfqMap;
+    window._trackerData = data;
+    renderTrackerFromCache();
+  } catch(e) {
+    if (body) body.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text3);font-size:12px;">Unable to load. Check connection.</div>';
+    if (status) { status.textContent = 'Error'; status.style.color = 'var(--red)'; }
+  }
+}
 
-    var html = '';
-    Object.keys(rfqMap).forEach(function(rfq){
-      var responses = rfqMap[rfq];
-      html += '<div style="margin-bottom:16px;padding-bottom:16px;border-bottom:1px solid var(--border);">';
-      html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">';
-      html += '<span style="font-family:var(--font-m);font-size:11px;color:var(--em);">' + rfq + '</span>';
-      html += '<span class="pill pill-green">' + responses.length + ' response(s)</span></div>';
-      responses.forEach(function(row){
-        // NEW column mapping:
-        // A=RFQ-REF, B=VENDOR-NAME, C=VENDOR-EMAIL, D=UNIT-PRICE,
-        // E=UNIT-OF-MEASURE, F=LEAD-TIME-DAYS, G=PAYMENT-TERMS,
-        // H=SPEC-COMPLIANCE, I=REMARKS, J=CONTACT, K=RECEIVED-AT, M=STATUS
-        var vName  = row[1] || row[2] || 'Unknown';
-        var vEmail = row[2] || '';
-        var price  = row[3] || '—';
-        var uom    = row[4] || '';
-        var lead   = row[5] || '—';
-        var pay    = row[6] || '—';
-        var spec   = row[7] || '—';
-        var remarks= row[8] || '';
-        var recvd  = row[10] || '';
-        var evalSt = row[12] || 'Pending evaluation';
+function renderTrackerFromCache() {
+  var body = document.getElementById('tracker-body');
+  var statusEl = document.getElementById('tracker-status');
+  var summaryRow = document.getElementById('tracker-summary-row');
+  var rfqFilterEl = document.getElementById('tracker-rfq-filter');
+  var productFilterEl = document.getElementById('tracker-product-filter');
+  var statusFilterEl = document.getElementById('tracker-status-filter');
+  if (!body || !window._trackerRFQMap) return;
 
-        // Clean up price — remove bracket text
-        price = price.replace(/\[.*?\]/g, '').trim();
-        pay   = pay.replace(/\[.*?\]/g, '').trim();
-        lead  = lead.replace(/\[.*?\]/g, '').trim();
+  var rfqMap = window._trackerRFQMap;
+  var data = window._trackerData || [];
+  var allRFQs = Object.keys(rfqMap).sort().reverse(); // newest first
 
-        var priceDisplay = price !== '—' && price ? '₹' + price + (uom ? ' / ' + uom : '') : '—';
-        var timeStr = recvd ? new Date(recvd).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}) : '';
+  // Build product map: rfqId → item name (from _activeRFQs + _rfqHistory)
+  var rfqProductMap = {};
+  (_activeRFQs || []).concat(_rfqHistory || []).forEach(function(r) { rfqProductMap[r.num] = r.item || r.num; });
 
-        html += '<div style="background:var(--bg3);border-radius:var(--r);padding:12px;margin-bottom:8px;">';
-        html += '<div style="display:flex;justify-content:space-between;margin-bottom:8px;">';
-        html += '<div><div style="font-size:13px;font-weight:500;color:var(--text);">' + vName + '</div>';
-        html += '<div style="font-size:11px;color:var(--text3);">' + vEmail + (timeStr ? ' · ' + timeStr : '') + '</div></div>';
-        html += '<span class="pill pill-green">&#10003; Received</span></div>';
-        html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px;">';
-        html += '<div style="font-size:11px;"><span style="color:var(--text3);">Price: </span><span style="color:var(--em);font-weight:600;">' + priceDisplay + '</span></div>';
-        if (lead !== '—') html += '<div style="font-size:11px;"><span style="color:var(--text3);">Lead time: </span><span style="color:var(--text2);">' + lead + ' days</span></div>';
-        if (pay !== '—')  html += '<div style="font-size:11px;"><span style="color:var(--text3);">Payment: </span><span style="color:var(--text2);">' + pay + '</span></div>';
-        if (spec !== '—') html += '<div style="font-size:11px;"><span style="color:var(--text3);">Spec: </span><span style="color:var(--text2);">' + spec + '</span></div>';
-        html += '</div>';
-        if (remarks && remarks.length > 2 && remarks.toLowerCase() !== 'na') {
-          html += '<div style="font-size:11px;color:var(--text3);background:var(--bg4);border-radius:4px;padding:6px 8px;line-height:1.5;margin-bottom:6px;">' + remarks.substring(0,150) + (remarks.length>150?'...':'') + '</div>';
-        }
-        html += '<div style="margin-top:8px;display:flex;justify-content:space-between;">';
-        html += '<span style="font-size:11px;color:var(--amber);">' + evalSt + '</span>';
-        html += '<button onclick="evaluateRFQ(\'' + rfq + '\')" style="font-size:11px;padding:3px 10px;" class="btn-secondary">Evaluate &rarr;</button>';
-        html += '</div></div>';
-      });
+  // ── Populate RFQ dropdown ──────────────────────────────────────────
+  if (rfqFilterEl) {
+    var prevRFQ = rfqFilterEl.value;
+    rfqFilterEl.innerHTML = '<option value="all">All RFQs (' + allRFQs.length + ')</option>';
+    allRFQs.forEach(function(rfq) {
+      var isClosed = !!(_rfqHistory||[]).find(function(r){ return r.num === rfq; });
+      var count = rfqMap[rfq].length;
+      var opt = document.createElement('option');
+      opt.value = rfq;
+      opt.text = rfq + ' · ' + count + ' quote' + (count!==1?'s':'') + (isClosed?' [Closed]':'');
+      rfqFilterEl.appendChild(opt);
+    });
+    if (prevRFQ) rfqFilterEl.value = prevRFQ;
+  }
+
+  // ── Populate Product dropdown ──────────────────────────────────────
+  if (productFilterEl) {
+    var prevProduct = productFilterEl.value;
+    // Gather unique product names from all known RFQs
+    var productSet = {};
+    allRFQs.forEach(function(rfq) {
+      var item = rfqProductMap[rfq];
+      if (item && item !== rfq) {
+        // Normalise: trim and lowercase for dedup key, keep original for display
+        var key = item.toLowerCase().trim();
+        if (!productSet[key]) productSet[key] = item;
+      }
+    });
+    productFilterEl.innerHTML = '<option value="all">All Products</option>';
+    Object.values(productSet).sort().forEach(function(item) {
+      var opt = document.createElement('option');
+      opt.value = item;
+      // Count how many RFQs relate to this product
+      var count = allRFQs.filter(function(rfq){ return (rfqProductMap[rfq]||'').toLowerCase() === item.toLowerCase(); }).length;
+      opt.text = item + ' (' + count + ' RFQ' + (count!==1?'s':'') + ')';
+      productFilterEl.appendChild(opt);
+    });
+    if (prevProduct) productFilterEl.value = prevProduct;
+  }
+
+  // ── Get active filters ─────────────────────────────────────────────
+  var rfqFilter     = rfqFilterEl ? rfqFilterEl.value : 'all';
+  var productFilter = productFilterEl ? productFilterEl.value : 'all';
+  var statusFilter  = statusFilterEl ? statusFilterEl.value : 'all';
+
+  // ── Filter RFQs ────────────────────────────────────────────────────
+  var rfqsToShow = allRFQs.filter(function(rfq) {
+    if (rfqFilter !== 'all' && rfq !== rfqFilter) return false;
+    if (productFilter !== 'all') {
+      var item = (rfqProductMap[rfq] || '').toLowerCase();
+      if (item !== productFilter.toLowerCase()) return false;
+    }
+    var isClosed = !!(_rfqHistory||[]).find(function(r){ return r.num === rfq; });
+    if (statusFilter === 'active' && isClosed) return false;
+    if (statusFilter === 'closed' && !isClosed) return false;
+    return true;
+  });
+
+  // ── Summary pills ──────────────────────────────────────────────────
+  if (summaryRow) {
+    summaryRow.style.display = allRFQs.length > 0 ? 'flex' : 'none';
+    summaryRow.innerHTML = allRFQs.map(function(rfq) {
+      var isClosed = !!(_rfqHistory||[]).find(function(r){ return r.num === rfq; });
+      var count = rfqMap[rfq].length;
+      var isSelected = rfqFilter === rfq;
+      var bg = isSelected ? (isClosed ? 'rgba(42,168,155,0.28)' : 'rgba(244,162,97,0.25)') : (isClosed ? 'rgba(42,168,155,0.10)' : 'rgba(244,162,97,0.08)');
+      var border = isClosed ? 'rgba(42,168,155,0.35)' : 'rgba(244,162,97,0.3)';
+      var color = isClosed ? 'var(--em)' : 'var(--amber)';
+      var shortId = rfq.replace(/RFQ-20(\d{2})(\d{4})-(\d+)/,'$2-$3');
+      var item = rfqProductMap[rfq];
+      var label = shortId + (item && item !== rfq ? ' · ' + item.substring(0,18) : '') + ' (' + count + ') ' + (isClosed ? '&#10003;' : '&#9679;');
+      return '<button onclick="document.getElementById(\'tracker-rfq-filter\').value=\'' + rfq + '\';renderTrackerFromCache();" ' +
+        'style="background:' + bg + ';border:1px solid ' + border + ';border-radius:20px;padding:3px 11px;font-size:11px;color:' + color + ';cursor:pointer;font-family:var(--font-m);white-space:nowrap;' + (isSelected?'outline:2px solid '+border+';outline-offset:1px;':'') + '">' + label + '</button>';
+    }).join('');
+  }
+
+  // ── Empty state ────────────────────────────────────────────────────
+  if (!rfqsToShow.length) {
+    body.innerHTML = '<div style="text-align:center;padding:32px;color:var(--text3);font-size:12px;">' +
+      (allRFQs.length > 0 ? 'No RFQs match the selected filters. <button onclick="document.getElementById(\'tracker-rfq-filter\').value=\'all\';document.getElementById(\'tracker-product-filter\').value=\'all\';document.getElementById(\'tracker-status-filter\').value=\'all\';renderTrackerFromCache();" style="color:var(--em);background:none;border:none;cursor:pointer;font-size:12px;">Clear filters</button>' : 'No responses yet. Waiting for vendors...') +
+      '</div>';
+    return;
+  }
+
+  // ── Build HTML ─────────────────────────────────────────────────────
+  var html = '';
+  rfqsToShow.forEach(function(rfq, idx) {
+    var responses = rfqMap[rfq];
+    var isClosed = (_rfqHistory||[]).find(function(r){ return r.num === rfq; });
+    var rfqItem = rfqProductMap[rfq] || '';
+    var accentColor = isClosed ? 'var(--em)' : 'var(--amber)';
+
+    html += '<div style="padding:14px 16px;' + (idx > 0 ? 'border-top:1px solid var(--border);' : '') + '">';
+
+    // RFQ header
+    html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:6px;">';
+    html += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">';
+    html += '<span style="font-family:var(--font-m);font-size:12px;color:' + accentColor + ';">' + rfq + '</span>';
+    if (rfqItem && rfqItem !== rfq) {
+      html += '<span style="background:var(--bg3);border:1px solid var(--border);border-radius:4px;padding:2px 8px;font-size:11px;color:var(--text2);">&#128230; ' + rfqItem + '</span>';
+    }
+    if (isClosed) {
+      html += '<span style="background:rgba(42,168,155,0.12);border:1px solid rgba(42,168,155,0.3);border-radius:20px;padding:2px 10px;font-size:10px;color:var(--em);">&#10003; CLOSED &middot; ' + (isClosed.awardedVendor||'—') + '</span>';
+    } else {
+      html += '<span style="background:rgba(244,162,97,0.08);border:1px solid rgba(244,162,97,0.25);border-radius:20px;padding:2px 10px;font-size:10px;color:var(--amber);">&#9679; ACTIVE &middot; ' + responses.length + ' quote' + (responses.length!==1?'s':'') + '</span>';
+    }
+    html += '</div>';
+    if (!isClosed) {
+      html += '<button onclick="evaluateRFQ(\'' + rfq + '\')" style="font-size:11px;padding:4px 14px;" class="btn-primary">Evaluate &#8594;</button>';
+    } else {
+      html += '<button onclick="evaluateRFQ(\'' + rfq + '\')" style="font-size:11px;padding:4px 14px;" class="btn-secondary">View history &#8594;</button>';
+    }
+    html += '</div>';
+
+    // Quote cards
+    html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:8px;">';
+    responses.forEach(function(row) {
+      var vName  = row[1] || row[2] || 'Unknown';
+      var vEmail = row[2] || '';
+      var price  = (row[3] || '').replace(/\[.*?\]/g,'').trim();
+      var uom    = row[4] || '';
+      var lead   = (row[5] || '').replace(/\[.*?\]/g,'').trim();
+      var pay    = (row[6] || '').replace(/\[.*?\]/g,'').trim();
+      var spec   = (row[7] || '').replace(/\[.*?\]/g,'').trim();
+      var remarks= row[8] || '';
+      var recvd  = row[10] || '';
+      var dbV = VENDOR_DATA.find(function(v){ return v['Email'] === vEmail; });
+      if (dbV) vName = dbV['Vendor Name'];
+      var priceDisplay = price ? '&#8377;' + price + (uom ? ' / ' + uom : '') : '—';
+      var timeStr = recvd ? new Date(recvd).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}) : '';
+      var leadNum = parseFloat((lead+'').replace(/[^\d.]/g,'')) || 0;
+      var leadDisplay = leadNum > 0 ? leadNum + ' days' : (lead || '—');
+      var specColor = spec === 'Full' ? 'var(--em)' : spec === 'Partial' ? 'var(--amber)' : /non/i.test(spec) ? 'var(--red)' : 'var(--text3)';
+
+      html += '<div style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--r);padding:11px 13px;">';
+      html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;">';
+      html += '<div style="flex:1;min-width:0;"><div style="font-size:12px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + vName + '</div>';
+      html += '<div style="font-size:10px;color:var(--text3);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + vEmail + '</div></div>';
+      html += '<span style="font-size:10px;color:var(--em);background:rgba(42,168,155,0.12);border-radius:10px;padding:2px 7px;margin-left:6px;white-space:nowrap;">&#10003; Rcvd</span>';
+      html += '</div>';
+      html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-bottom:6px;">';
+      html += '<div style="background:var(--bg4);border-radius:4px;padding:5px 8px;"><div style="font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px;">Price</div><div style="font-size:12px;font-weight:700;color:var(--em);">' + priceDisplay + '</div></div>';
+      html += '<div style="background:var(--bg4);border-radius:4px;padding:5px 8px;"><div style="font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px;">Lead Time</div><div style="font-size:12px;font-weight:600;color:var(--text);">' + leadDisplay + '</div></div>';
+      html += '<div style="background:var(--bg4);border-radius:4px;padding:5px 8px;"><div style="font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px;">Payment</div><div style="font-size:11px;color:var(--text2);margin-top:1px;">' + (pay||'—') + '</div></div>';
+      html += '<div style="background:var(--bg4);border-radius:4px;padding:5px 8px;"><div style="font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px;">Spec</div><div style="font-size:11px;font-weight:600;color:' + specColor + ';margin-top:1px;">' + (spec||'—') + '</div></div>';
+      html += '</div>';
+      if (remarks && remarks.length > 2 && remarks.toLowerCase() !== 'na') {
+        html += '<div style="font-size:10px;color:var(--text3);background:var(--bg4);border-radius:4px;padding:5px 7px;line-height:1.5;margin-bottom:4px;">' + remarks.substring(0,100) + (remarks.length>100?'...':'') + '</div>';
+      }
+      if (timeStr) html += '<div style="font-size:10px;color:var(--text3);text-align:right;margin-top:3px;">Rcvd ' + timeStr + '</div>';
       html += '</div>';
     });
-    body.innerHTML = html || '<div style="padding:16px;text-align:center;color:var(--text3);font-size:12px;">No data.</div>';
-    status.textContent = data.length + ' response(s) · Live';
-    // Store globally for Bid Eval
-    window._trackerRFQMap = rfqMap;
-    // Update dashboard KPIs
-    var uniqueRFQs = Object.keys(rfqMap).length;
-    var pendingEval = data.filter(function(r){ return (r[12]||'').toLowerCase().includes('pending'); }).length;
-    var uniqueVendors = [...new Set(data.map(function(r){ return r[2]; }).filter(Boolean))].length;
-    var kpiAR = document.getElementById('kpi-active-rfqs');
-    var kpiQR = document.getElementById('kpi-quotes-received');
-    var kpiPE = document.getElementById('kpi-pending');
-    var kpiVR = document.getElementById('kpi-vendors');
-    if(kpiAR) { kpiAR.textContent = uniqueRFQs; document.getElementById('kpi-active-rfqs-sub').textContent = 'Unique RFQ cycles'; }
-    if(kpiQR) { kpiQR.textContent = data.length; document.getElementById('kpi-quotes-sub').textContent = 'Total quotes logged'; }
-    if(kpiPE) { kpiPE.textContent = pendingEval; document.getElementById('kpi-pending-sub').textContent = 'Awaiting bid evaluation'; }
-    if(kpiVR) { kpiVR.textContent = uniqueVendors; document.getElementById('kpi-vendors-sub').textContent = 'Unique vendors replied'; }
-    status.style.color = 'var(--em)';
-  } catch(e) {
-    body.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text3);font-size:12px;">Unable to load. Check connection.</div>';
-    status.textContent = 'Error'; status.style.color = 'var(--red)';
-  }
+    html += '</div></div>';
+  });
+
+  body.innerHTML = html;
+  if (statusEl) { statusEl.textContent = data.length + ' response(s) · Live'; statusEl.style.color = 'var(--em)'; }
+
+  // Update KPIs
+  var pendingEval = data.filter(function(r){ return (r[12]||'').toLowerCase().includes('pending'); }).length;
+  var uniqueVendors = (new Set(data.map(function(r){ return r[2]; }).filter(Boolean))).size;
+  var kpiAR = document.getElementById('kpi-active-rfqs');
+  var kpiQR = document.getElementById('kpi-quotes-received');
+  var kpiPE = document.getElementById('kpi-pending');
+  var kpiVR = document.getElementById('kpi-vendors');
+  if(kpiAR) { kpiAR.textContent = Object.keys(rfqMap).length; }
+  if(kpiQR) { kpiQR.textContent = data.length; }
+  if(kpiPE) { kpiPE.textContent = pendingEval; }
+  if(kpiVR) { kpiVR.textContent = uniqueVendors; }
 }
 
 // Auto-load when RFQ page opens
