@@ -1170,7 +1170,20 @@ nav {
             <div class="card-body">
               <div class="form-group">
                 <label class="form-label">What are you buying?</label>
-                <input class="form-input" placeholder="e.g. Corrugated boxes 40×30×20 cm" id="rfq-item">
+                <input class="form-input" placeholder="e.g. Corrugated boxes 40×30×20 cm" id="rfq-item" list="rfq-item-list" autocomplete="off">
+                <datalist id="rfq-item-list">
+                  <option value="Corrugated Packaging Boxes">
+                  <option value="Electronic Components — PCB Assemblies &amp; Connectors">
+                  <option value="Pharmaceutical Packaging — Blister Packs">
+                  <option value="Cold Chain Logistics Services">
+                  <option value="API Raw Materials — Paracetamol">
+                  <option value="Rigid Packaging — HDPE Bottles">
+                  <option value="3PL Warehousing Services">
+                  <option value="International Freight Forwarding">
+                  <option value="Last Mile Delivery Services">
+                  <option value="Sustainable Packaging — Kraft Boxes">
+                </datalist>
+                <div style="font-size:11px;color:var(--text3);margin-top:4px;">Type to search or select from previous products. New products are auto-saved for future RFQs.</div>
               </div>
               <div class="form-group">
                 <label class="form-label">Specification / key requirements</label>
@@ -1323,11 +1336,19 @@ nav {
           <div class="page-title">Bid Evaluation</div>
           <div class="page-sub">AI-scored comparison of vendor quotes with ranked recommendations.</div>
         </div>
-        <div style="display:flex;align-items:center;gap:10px;">
-          <label style="font-size:12px;color:var(--text3);">Select RFQ:</label>
-          <select id="bideval-rfq-select" class="form-select" style="width:260px;font-size:13px;" onchange="updateBidEvalRFQ(this.value)">
-            <option value="">— No RFQs dispatched yet —</option>
-          </select>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+          <div style="display:flex;flex-direction:column;gap:2px;">
+            <label style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;">Filter by Product</label>
+            <select id="bideval-product-filter" class="form-select" style="width:200px;font-size:12px;" onchange="filterBidEvalByProduct(this.value)">
+              <option value="all">All Products</option>
+            </select>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:2px;">
+            <label style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;">Select RFQ</label>
+            <select id="bideval-rfq-select" class="form-select" style="width:260px;font-size:13px;" onchange="updateBidEvalRFQ(this.value)">
+              <option value="">— Select RFQ —</option>
+            </select>
+          </div>
         </div>
       </div>
 
@@ -1866,6 +1887,12 @@ function addActiveRFQRow(num, item, vendorCount, deadline) {
   _activeRFQs.push(rfqEntry);
   renderActiveRFQs();
   persistData();
+  // Auto-save product name to datalist
+  var dl = document.getElementById('rfq-item-list');
+  if (dl && item) {
+    var exists = Array.from(dl.options).some(function(o){ return o.value.toLowerCase() === item.toLowerCase(); });
+    if (!exists) { var opt2 = document.createElement('option'); opt2.value = item; dl.appendChild(opt2); }
+  }
   // Hide dashboard empty row
   var dashEmptyRow = document.getElementById('rfq-empty-row');
   if (dashEmptyRow) dashEmptyRow.style.display = 'none';
@@ -1914,33 +1941,15 @@ function renderActiveRFQs() {
 
 // ── Close the Loop Modal ──────────────────────────────────────────────────────
 function openAwardFromBidEval() {
-  // Get currently selected RFQ from bid eval dropdown
   var sel = document.getElementById('bideval-rfq-select');
-  var rfqId = sel ? sel.value : 'RFQ-CURRENT';
-  var rfqLabel = sel ? sel.options[sel.selectedIndex].text.split('·')[1].trim() : 'Current RFQ';
-  // Pre-fill recommended vendor from the hardcoded/live recommendation
-  document.getElementById('close-rfq-num').textContent = rfqId;
-  document.getElementById('close-rfq-item').textContent = rfqLabel;
-  document.getElementById('close-rfq-awarded-vendor').value = '';
-  document.getElementById('close-rfq-po-number').value = '';
-  document.getElementById('close-rfq-followed-rec').value = 'yes';
-  document.getElementById('close-rfq-reason').value = '';
-  document.getElementById('close-rfq-reason-group').style.display = 'none';
-  document.getElementById('close-rfq-overlay').dataset.rfqNum = rfqId;
-  document.getElementById('close-rfq-overlay').style.display = 'flex';
+  var rfqId = sel && sel.value ? sel.value : '';
+  if (!rfqId) { alert('Please select an RFQ from the dropdown first.'); return; }
+  openAwardFromBidEvalFor(rfqId);
 }
 
-
 function openCloseRFQModal(rfqNum, rfqItem) {
-  document.getElementById('close-rfq-num').textContent = rfqNum;
-  document.getElementById('close-rfq-item').textContent = rfqItem;
-  document.getElementById('close-rfq-awarded-vendor').value = '';
-  document.getElementById('close-rfq-po-number').value = '';
-  document.getElementById('close-rfq-followed-rec').value = 'yes';
-  document.getElementById('close-rfq-reason').value = '';
-  document.getElementById('close-rfq-reason-group').style.display = 'none';
-  document.getElementById('close-rfq-overlay').style.display = 'flex';
-  document.getElementById('close-rfq-overlay').dataset.rfqNum = rfqNum;
+  openAwardFromBidEvalFor(rfqNum);
+  if (rfqItem) document.getElementById('close-rfq-item').textContent = rfqItem;
 }
 
 function toggleCloseRFQReason(val) {
@@ -2096,6 +2105,14 @@ async function loadQuoteTracker() {
     // Store globally
     window._trackerRFQMap = rfqMap;
     window._trackerData = data;
+    // Build item map from sheet column N (index 13) — source of truth for product names
+    var sheetItemMap = {};
+    data.forEach(function(row) {
+      var rfq = (row[0]||'').trim();
+      var item = (row[13]||'').trim(); // Column N = Item
+      if (rfq && item && !sheetItemMap[rfq]) sheetItemMap[rfq] = item;
+    });
+    window._sheetItemMap = sheetItemMap;
     renderTrackerFromCache();
   } catch(e) {
     if (body) body.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text3);font-size:12px;">Unable to load. Check connection.</div>';
@@ -2116,9 +2133,16 @@ function renderTrackerFromCache() {
   var data = window._trackerData || [];
   var allRFQs = Object.keys(rfqMap).sort().reverse(); // newest first
 
-  // Build product map: rfqId → item name (from _activeRFQs + _rfqHistory)
+  // Build product map — sheet column N is primary, local storage is fallback
   var rfqProductMap = {};
-  (_activeRFQs || []).concat(_rfqHistory || []).forEach(function(r) { rfqProductMap[r.num] = r.item || r.num; });
+  // First from sheet data (most accurate)
+  Object.keys(window._sheetItemMap || {}).forEach(function(rfq) {
+    rfqProductMap[rfq] = window._sheetItemMap[rfq];
+  });
+  // Fill gaps from local storage
+  (_activeRFQs || []).concat(_rfqHistory || []).forEach(function(r) {
+    if (!rfqProductMap[r.num] && r.item) rfqProductMap[r.num] = r.item;
+  });
 
   // ── Populate RFQ dropdown ──────────────────────────────────────────
   if (rfqFilterEl) {
@@ -2295,7 +2319,8 @@ function renderTrackerFromCache() {
 var _origShowPageTracker = window.showPage;
 window.showPage = function(name) {
   _origShowPageTracker(name);
-  if (name === 'rfq') setTimeout(loadQuoteTracker, 400);
+  if (name === 'rfq') { renderActiveRFQs(); setTimeout(loadQuoteTracker, 400); }
+  if (name === 'bideval') { populateBidEvalDropdown(); }
 };
 
 // Refresh every 2 minutes
@@ -3001,16 +3026,102 @@ window.renderVendors = function() {
 // ── Bid Evaluation RFQ Dropdown ──────────────────────────────────────────────
 var _bidevAlRFQs = [];
 
-function evaluateRFQ(rfqNum) {
-  // Navigate to bid eval page
-  showPage('bideval');
+function populateBidEvalDropdown(filterProduct) {
+  var sel = document.getElementById('bideval-rfq-select');
+  var prodSel = document.getElementById('bideval-product-filter');
+  if (!sel) return;
 
-  // Update RFQ dropdown
-  addRFQToBidEvalDropdown(rfqNum, rfqNum);
+  // Combine active RFQs + history + tracker
+  var allRFQs = (_activeRFQs || []).concat(_rfqHistory || []);
+  Object.keys(window._trackerRFQMap || {}).forEach(function(id) {
+    if (!allRFQs.find(function(r){ return r.num === id; }))
+      allRFQs.push({ num: id, item: (window._sheetItemMap||{})[id] || id, status: 'Active' });
+  });
+  // Deduplicate
+  var seen = {};
+  allRFQs = allRFQs.filter(function(r){ if (seen[r.num]) return false; seen[r.num]=1; return true; });
+
+  // Populate product filter
+  if (prodSel) {
+    var prevProd = prodSel.value;
+    var productSet = {};
+    allRFQs.forEach(function(rfq) {
+      var item = (window._sheetItemMap||{})[rfq.num] || (rfq.item && rfq.item !== rfq.num ? rfq.item : '');
+      if (item) { var k = item.toLowerCase().trim(); if (!productSet[k]) productSet[k] = item; }
+    });
+    prodSel.innerHTML = '<option value="all">All Products</option>';
+    Object.values(productSet).sort().forEach(function(item) {
+      var count = allRFQs.filter(function(r){
+        var ri = (window._sheetItemMap||{})[r.num] || r.item || '';
+        return ri.toLowerCase() === item.toLowerCase();
+      }).length;
+      var opt = document.createElement('option');
+      opt.value = item;
+      opt.text = item + ' (' + count + ' RFQ' + (count!==1?'s':'') + ')';
+      prodSel.appendChild(opt);
+    });
+    if (prevProd && prevProd !== 'all') prodSel.value = prevProd;
+    if (filterProduct) prodSel.value = filterProduct;
+  }
+
+  var activeProdFilter = prodSel ? prodSel.value : 'all';
+
+  // Filter RFQs by product if needed
+  var rfqsToShow = activeProdFilter === 'all' ? allRFQs : allRFQs.filter(function(rfq) {
+    var item = (window._sheetItemMap||{})[rfq.num] || rfq.item || '';
+    return item.toLowerCase() === activeProdFilter.toLowerCase();
+  });
+
+  if (!rfqsToShow.length) {
+    sel.innerHTML = '<option value="">— No RFQs for this product —</option>';
+    return;
+  }
+  var prev = sel.value;
+  sel.innerHTML = '<option value="">— Select RFQ —</option>';
+  rfqsToShow.forEach(function(rfq) {
+    var opt = document.createElement('option');
+    opt.value = rfq.num;
+    var closedTag = rfq.status === 'Closed' ? ' [Closed]' : '';
+    var itemLabel = (window._sheetItemMap||{})[rfq.num] || (rfq.item && rfq.item !== rfq.num ? rfq.item : '');
+    opt.text = rfq.num + (itemLabel ? ' · ' + itemLabel.substring(0,25) : '') + closedTag;
+    sel.appendChild(opt);
+  });
+  if (prev) sel.value = prev;
+}
+
+function filterBidEvalByProduct(product) {
+  populateBidEvalDropdown(product);
+  // Auto-select first RFQ for this product
+  var sel = document.getElementById('bideval-rfq-select');
+  if (sel && sel.options.length > 1) {
+    sel.selectedIndex = 1;
+    evaluateRFQ(sel.value);
+  }
+}
+
+function updateBidEvalRFQ(rfqId) {
+  if (rfqId) evaluateRFQ(rfqId);
+}
+
+function addRFQToBidEvalDropdown(rfqId, rfqLabel) {
+  populateBidEvalDropdown();
+}
+
+function evaluateRFQ(rfqNum) {
+  // Only call showPage if not already on bideval
+  var cur = document.querySelector('.page.active');
+  if (!cur || cur.id !== 'page-bideval') showPage('bideval');
+
+  populateBidEvalDropdown();
   var sel = document.getElementById('bideval-rfq-select');
   if (sel) sel.value = rfqNum;
 
-  // Get tracker data for this RFQ
+  // Check if closed
+  var histEntry = (_rfqHistory || []).find(function(r){ return r.num === rfqNum; });
+  var activeEntry = (_activeRFQs || []).find(function(r){ return r.num === rfqNum; });
+  var rfqEntry = histEntry || activeEntry;
+  var isClosed = !!histEntry;
+
   var rfqMap = window._trackerRFQMap || {};
   var responses = rfqMap[rfqNum] || [];
 
@@ -3019,83 +3130,89 @@ function evaluateRFQ(rfqNum) {
       '<div class="card"><div style="text-align:center;padding:48px 24px;">' +
       '<div style="font-size:36px;margin-bottom:12px;">📋</div>' +
       '<div style="font-size:14px;font-weight:600;color:var(--text);">No quote data available yet</div>' +
-      '<div style="font-size:13px;color:var(--text3);margin-top:8px;">Vendor replies have not been captured in the tracker yet.</div>' +
+      '<div style="font-size:13px;color:var(--text3);margin-top:8px;">Vendor replies have not been captured in the tracker yet for this RFQ.</div>' +
       '</div></div>';
+    document.querySelectorAll('#page-bideval .tab').forEach(function(t){ t.classList.remove('active'); });
+    var ft = document.querySelector('#page-bideval .tab'); if (ft) ft.classList.add('active');
+    ['tab-compare','tab-scorecard','tab-recommendation'].forEach(function(id){
+      var el = document.getElementById(id); if (el) el.style.display = id==='tab-compare'?'block':'none';
+    });
     return;
   }
 
-  // Build comparative quote table from real data
-  // Get target price from active RFQ if available
+  // Target price
   var targetPriceNum = 0;
-  var activeRFQ = _activeRFQs.find(function(r){ return r.num === rfqNum; });
-  if (activeRFQ && activeRFQ.target_price) {
-    targetPriceNum = parseFloat((activeRFQ.target_price + '').replace(/[^\d.]/g,'')) || 0;
-  }
+  if (rfqEntry && rfqEntry.target_price)
+    targetPriceNum = parseFloat((rfqEntry.target_price+'').replace(/[^\d.]/g,'')) || 0;
 
   var rows = responses.map(function(row, i) {
-    // NEW column mapping: A=RFQ-REF, B=VENDOR-NAME, C=VENDOR-EMAIL,
-    // D=UNIT-PRICE, E=UNIT-OF-MEASURE, F=LEAD-TIME-DAYS,
-    // G=PAYMENT-TERMS, H=SPEC-COMPLIANCE, I=REMARKS, K=RECEIVED-AT
     var vName  = row[1] || row[2] || 'Unknown Vendor';
     var vEmail = row[2] || '';
-    var price  = (row[3] || '—').replace(/\[.*?\]/g,'').trim();
-    var uom    = (row[4] || '').replace(/\[.*?\]/g,'').trim();
-    var lead   = (row[5] || '—').replace(/\[.*?\]/g,'').trim();
-    var pay    = (row[6] || '—').replace(/\[.*?\]/g,'').trim();
-    var spec   = (row[7] || '—').replace(/\[.*?\]/g,'').trim();
-    var notes  = (row[8] || '').substring(0, 500);
+    var priceRaw = (row[3] || '').replace(/\[.*?\]/g,'').trim();
+    var uom      = (row[4] || '').replace(/\[.*?\]/g,'').trim();
+    // FIX 3: Properly parse lead time from col F
+    var leadRaw  = (row[5] || '').replace(/\[.*?\]/g,'').trim();
+    var leadNum  = parseFloat(leadRaw.replace(/[^\d.]/g,'')) || 0;
+    var leadDisplay = leadNum > 0 ? leadNum + ' days' : (leadRaw && leadRaw !== '' ? leadRaw : '—');
+    var pay  = (row[6] || '—').replace(/\[.*?\]/g,'').trim();
+    var spec = (row[7] || '—').replace(/\[.*?\]/g,'').trim();
+    var notes = (row[8] || '').substring(0, 500);
 
-    // Format price display
-    var priceDisplay = price !== '—' && price ? '₹' + price + (uom ? ' / ' + uom : '') : '—';
+    // UOM normalisation: box/pack of N
+    var priceNum = parseFloat(priceRaw.replace(/[^\d.]/g,'')) || 0;
+    var normalizedPrice = priceNum;
+    var normalizedUOM = uom || 'per unit';
+    var priceNote = '';
+    var packMatch = (uom+' '+priceRaw).match(/(?:box|pack|carton|bag|set|bundle|case|packet)\s+of\s+(\d+)/i);
+    var dozenMatch = /per\s*dozen/i.test(uom+' '+priceRaw);
+    if (packMatch && priceNum > 0) {
+      var qty = parseInt(packMatch[1]);
+      if (qty > 1) { normalizedPrice = +(priceNum/qty).toFixed(4); normalizedUOM = 'per unit'; priceNote = '(₹'+priceNum+' / '+uom.trim()+'÷'+qty+')'; }
+    } else if (dozenMatch && priceNum > 0) {
+      normalizedPrice = +(priceNum/12).toFixed(4); normalizedUOM = 'per unit'; priceNote = '(₹'+priceNum+'/dozen÷12)';
+    }
+    var priceDisplay = normalizedPrice > 0
+      ? '₹' + normalizedPrice + ' / ' + normalizedUOM + (priceNote ? '<br><span style="font-size:10px;color:var(--text3);">'+priceNote+'</span>' : '')
+      : (priceRaw || '—');
 
-    // Try to extract vendor name from ref_line in notes
+    // Cross-ref vendor name
     var refNameMatch = notes.match(/VENDOR-NAME:\s*([^|\n\r]+)/);
     if (refNameMatch && refNameMatch[1].trim()) vName = refNameMatch[1].trim();
-
-    // Try to extract vendor ID from ref_line
     var refIdMatch = notes.match(/VENDOR:\s*(V\d+)/);
     var vendorId = refIdMatch ? refIdMatch[1].trim() : '';
+    if (vendorId) { var dbV = VENDOR_DATA.find(function(v){ return v['Vendor ID']===vendorId; }); if (dbV) vName = dbV['Vendor Name']; }
+    if (vName.includes('@')) { var dbE = VENDOR_DATA.find(function(v){ return v['Email']===vEmail||v['Email']===vName; }); if (dbE) vName = dbE['Vendor Name']; }
 
-    // Cross-reference with vendor database for company name
-    if (vendorId) {
-      var dbVendor = VENDOR_DATA.find(function(v){ return v['Vendor ID'] === vendorId; });
-      if (dbVendor) vName = dbVendor['Vendor Name'];
-    }
-
-    // If still email-like, try to find from vendor DB by email
-    if (vName.includes('@')) {
-      var dbVendorByEmail = VENDOR_DATA.find(function(v){ return v['Email'] === vEmail || v['Email'] === vName; });
-      if (dbVendorByEmail) vName = dbVendorByEmail['Vendor Name'];
-    }
-
-    // Try to extract numeric price
-    var priceNum = parseFloat((price + '').replace(/[^\d.]/g, '')) || 0;
-    return { vName, vendorId, vEmail, price: priceDisplay, priceNum, lead, pay, spec, notes, rank: i+1 };
+    return { vName:vName, vendorId:vendorId, vEmail:vEmail, price:priceDisplay, priceNum:normalizedPrice, leadDisplay:leadDisplay, pay:pay, spec:spec, rank:i+1 };
   });
 
-  // Sort by price ascending for ranking
-  var sorted = rows.slice().filter(function(r){ return r.priceNum > 0; })
-    .sort(function(a,b){ return a.priceNum - b.priceNum; });
+  var sorted = rows.slice().filter(function(r){ return r.priceNum > 0; }).sort(function(a,b){ return a.priceNum-b.priceNum; });
   var lowestPrice = sorted.length ? sorted[0].priceNum : 0;
-
-  // Check if ALL quotes are above target price
   var allAboveTarget = targetPriceNum > 0 && sorted.length > 0 && sorted[0].priceNum > targetPriceNum;
 
-  // Assign ranks based on price
   rows.forEach(function(r) {
     if (r.priceNum > 0 && sorted.length) {
-      r.rank = sorted.findIndex(function(s){ return s.vName === r.vName; }) + 1;
-      r.vsLowest = lowestPrice > 0 ? (((r.priceNum - lowestPrice) / lowestPrice) * 100).toFixed(1) : '—';
-      r.vsTarget = targetPriceNum > 0 ? (((r.priceNum - targetPriceNum) / targetPriceNum) * 100).toFixed(1) : '—';
+      r.rank = sorted.findIndex(function(s){ return s.vName===r.vName; }) + 1;
+      r.vsLowest = lowestPrice > 0 ? (((r.priceNum-lowestPrice)/lowestPrice)*100).toFixed(1) : '—';
+      r.vsTarget = targetPriceNum > 0 ? (((r.priceNum-targetPriceNum)/targetPriceNum)*100).toFixed(1) : '—';
       r.aboveTarget = targetPriceNum > 0 && r.priceNum > targetPriceNum;
     }
   });
 
-  var tableHTML = '<div class="card" style="margin-bottom:16px;">' +
-    '<div class="card-header"><div class="card-title">Comparative quote table — ' + rfqNum + '</div>' +
-    '<div class="card-action" onclick="exportBidEval(\'' + rfqNum + '\')">Export →</div></div>' +
+  // Closed banner
+  var closedBanner = isClosed
+    ? '<div style="background:rgba(42,168,155,0.08);border:1px solid rgba(42,168,155,0.3);border-radius:var(--r2);padding:12px 18px;margin-bottom:16px;font-size:13px;color:var(--text2);">&#10003; <strong style="color:var(--em);">Closed RFQ</strong> — awarded to <strong>' + (rfqEntry.awardedVendor||'—') + '</strong>' + (rfqEntry.closedDate?' · '+rfqEntry.closedDate:'') + '. Showing quote history only.</div>'
+    : '';
+
+  // Get item name for this RFQ
+  var rfqItemName = (window._sheetItemMap||{})[rfqNum] || (rfqEntry ? rfqEntry.item : '') || '';
+
+  var tableHTML = closedBanner +
+    '<div class="card" style="margin-bottom:16px;">' +
+    '<div class="card-header"><div class="card-title">Comparative quote table — ' + rfqNum + (rfqItemName ? ' · <span style="color:var(--text2);font-weight:400;font-size:13px;">'+rfqItemName+'</span>' : '') + '</div>' +
+    '<div class="card-action" onclick="exportBidEval(\''+rfqNum+'\')">Export →</div></div>' +
     '<div style="overflow-x:auto;"><table class="tbl"><thead><tr>' +
-    '<th>Vendor</th><th>Quoted Price</th><th>vs Lowest</th>' +
+    '<th>Vendor</th><th>Item</th><th>Quoted Price</th><th>vs Lowest</th>' +
     (targetPriceNum > 0 ? '<th>vs Target</th>' : '') +
     '<th>Lead Time</th><th>Payment</th><th>Rank</th>' +
     '</tr></thead><tbody>';
@@ -3103,71 +3220,111 @@ function evaluateRFQ(rfqNum) {
   rows.forEach(function(r) {
     var rankPill = r.rank === 1 ? '<span class="pill pill-green">1st ⭐</span>'
       : r.rank === 2 ? '<span class="pill pill-amber">2nd</span>'
-      : '<span class="pill pill-gray">' + r.rank + (r.rank===3?'rd':'th') + '</span>';
+      : r.rank > 0 ? '<span class="pill pill-gray">'+r.rank+(r.rank===3?'rd':'th')+'</span>'
+      : '<span style="font-size:11px;color:var(--text3);">—</span>';
     var vsCol = r.vsLowest === '0.0' ? '<span style="color:var(--em);">Lowest</span>'
-      : r.vsLowest !== '—' ? '<span style="color:var(--amber);">+' + r.vsLowest + '%</span>' : '—';
-    var vsTargetCol = r.vsTarget !== '—'
-      ? (r.aboveTarget
-          ? '<span style="color:var(--red);">+' + r.vsTarget + '% ⚠️</span>'
-          : '<span style="color:var(--em);">-' + Math.abs(r.vsTarget) + '%</span>')
-      : '';
-    var isRecommended = r.rank === 1;
-    tableHTML += '<tr' + (isRecommended ? ' style="background:rgba(42,168,155,0.05);"' : '') + '>' +
-      '<td><div style="font-weight:500;">' + r.vName + '</div>' +
-      (r.vendorId ? '<div style="font-size:11px;color:var(--text3);">' + r.vendorId + '</div>' : '') +
-      (isRecommended ? '<div style="font-size:11px;color:var(--em);">Recommended</div>' : '') +
-      '<div style="font-size:11px;color:var(--text3);">' + r.vEmail + '</div></td>' +
-      '<td style="font-family:var(--font-m);">' + r.price + '</td>' +
-      '<td>' + vsCol + '</td>' +
-      (targetPriceNum > 0 ? '<td>' + vsTargetCol + '</td>' : '') +
-      '<td>' + r.deliv + '</td>' +
-      '<td>' + r.pay + '</td>' +
-      '<td>' + rankPill + '</td></tr>';
+      : (r.vsLowest && r.vsLowest !== '—') ? '<span style="color:var(--amber);">+'+r.vsLowest+'%</span>' : '—';
+    var vsTargetCol = (r.vsTarget && r.vsTarget !== '—')
+      ? (r.aboveTarget ? '<span style="color:var(--red);">+'+r.vsTarget+'% ⚠️</span>' : '<span style="color:var(--em);">'+r.vsTarget+'%</span>') : '';
+    var isRec = r.rank === 1 && !isClosed;
+    var isAwarded = isClosed && rfqEntry && rfqEntry.awardedVendor && r.vName.toLowerCase().indexOf(rfqEntry.awardedVendor.toLowerCase().split(' ')[0]) >= 0;
+    tableHTML += '<tr'+(( isRec||isAwarded)?' style="background:rgba(42,168,155,0.05);"':'')+'>'+
+      '<td><div style="font-weight:500;">'+r.vName+'</div>'+
+      (isRec?'<div style="font-size:11px;color:var(--em);">Recommended</div>':'')+
+      (isAwarded?'<div style="font-size:11px;color:var(--em);">&#10003; Awarded</div>':'')+
+      '<div style="font-size:11px;color:var(--text3);">'+r.vEmail+'</div></td>'+
+      '<td style="font-size:11px;color:var(--text2);">'+(rfqItemName||'—')+'</td>'+
+      '<td style="font-family:var(--font-m);font-size:12px;">'+r.price+'</td>'+
+      '<td>'+vsCol+'</td>'+
+      (targetPriceNum > 0 ? '<td>'+vsTargetCol+'</td>' : '')+
+      '<td>'+r.leadDisplay+'</td>'+   // FIX 3: was r.deliv
+      '<td>'+r.pay+'</td>'+
+      '<td>'+rankPill+'</td></tr>';
   });
-
   tableHTML += '</tbody></table></div></div>';
 
-  // Above target warning banner
   if (allAboveTarget) {
     tableHTML += '<div style="background:rgba(220,53,69,0.08);border:1px solid rgba(220,53,69,0.3);border-radius:var(--r2);padding:14px 18px;margin-bottom:16px;">' +
       '<div style="font-size:13px;font-weight:600;color:var(--red);margin-bottom:4px;">⚠️ All quotes received are above target price</div>' +
-      '<div style="font-size:12px;color:var(--text2);">Target: ₹' + targetPriceNum + ' · Lowest quote: ₹' + lowestPrice + ' (' + (((lowestPrice-targetPriceNum)/targetPriceNum)*100).toFixed(1) + '% above target). Consider negotiating with ' + (sorted[0] ? sorted[0].vName : 'top vendor') + ' or revising the target price.</div>' +
+      '<div style="font-size:12px;color:var(--text2);">Target: ₹'+targetPriceNum+' · Lowest: ₹'+lowestPrice+' ('+(((lowestPrice-targetPriceNum)/targetPriceNum)*100).toFixed(1)+'% above). Consider negotiating with '+(sorted[0]?sorted[0].vName:'top vendor')+'.</div>' +
       '</div>';
   }
 
-  // Action buttons
-  tableHTML += '<div style="display:flex;gap:10px;margin-top:4px;">' +
-    '<button class="btn-primary" onclick="openAwardFromBidEval()">Generate award letter →</button>' +
-    '<button class="btn-secondary" onclick="exportBidEval(\'' + rfqNum + '\')">Export report</button>' +
-    '</div>';
+  // FIX 4: Only show award button for active; pass rfqNum explicitly
+  if (!isClosed) {
+    tableHTML += '<div style="display:flex;gap:10px;margin-top:4px;">' +
+      '<button class="btn-primary" onclick="openAwardFromBidEvalFor(\''+rfqNum+'\')">Generate award letter →</button>' +
+      '<button class="btn-secondary" onclick="exportBidEval(\''+rfqNum+'\')">Export report</button>' +
+      '</div>';
+  } else {
+    tableHTML += '<div style="display:flex;gap:10px;margin-top:4px;">' +
+      '<button class="btn-secondary" onclick="exportBidEval(\''+rfqNum+'\')">Export report</button>' +
+      '</div>';
+  }
 
   document.getElementById('tab-compare').innerHTML = tableHTML;
 
-  // Build AI recommendation tab
-  if (sorted.length > 0) {
+  if (sorted.length > 0 && !isClosed) {
     var top = sorted[0];
-    var recHTML = '<div class="card"><div class="card-header"><div class="card-title">AI recommendation</div>' +
-      '<span class="pill pill-green">Generated</span></div><div class="card-body">' +
+    var recHTML = '<div class="card"><div class="card-header"><div class="card-title">AI recommendation</div><span class="pill pill-green">Generated</span></div><div class="card-body">' +
       '<div style="background:var(--em-dim);border:1px solid rgba(244,162,97,0.2);border-radius:var(--r);padding:16px;margin-bottom:16px;font-size:13px;line-height:1.8;color:var(--text2);">' +
-      '<div style="font-family:var(--font-d);font-size:15px;font-weight:600;color:var(--em);margin-bottom:8px;">Recommend: ' + top.vName + '</div>' +
-      top.vName + ' submitted the lowest quote of <strong style="color:var(--text);">' + top.price + '</strong> for ' + rfqNum + '.' +
-      (sorted.length > 1 ? ' Next best quote was from <strong>' + sorted[1].vName + '</strong> at ' + sorted[1].price + ' (+' + sorted[1].vsTarget + '% above lowest).' : '') +
-      '<br><br><strong style="color:var(--text);">Note:</strong> Prices shown are as quoted. Verify spec compliance and delivery terms before awarding.' +
-      '</div>' +
-      '<div style="display:flex;gap:10px;">' +
-      '<button class="btn-primary" onclick="openAwardFromBidEval()">Generate award letter →</button>' +
-      '<button class="btn-secondary" onclick="exportBidEval(\'' + rfqNum + '\')">Export report</button>' +
-      '</div></div></div>';
+      '<div style="font-family:var(--font-d);font-size:15px;font-weight:600;color:var(--em);margin-bottom:8px;">Recommend: '+top.vName+'</div>' +
+      top.vName+' submitted the lowest normalized quote for '+rfqNum+'.'+
+      (sorted.length > 1 ? ' Next best: <strong>'+sorted[1].vName+'</strong>.' : '')+
+      '<br><br><strong style="color:var(--text);">Note:</strong> Prices normalized to per-unit. Verify spec compliance before awarding.</div>' +
+      '<div style="display:flex;gap:10px;"><button class="btn-primary" onclick="openAwardFromBidEvalFor(\''+rfqNum+'\')">Generate award letter →</button>' +
+      '<button class="btn-secondary" onclick="exportBidEval(\''+rfqNum+'\')">Export report</button></div></div></div>';
     document.getElementById('tab-recommendation').innerHTML = recHTML;
   }
 
-  // Switch to compare tab
   document.querySelectorAll('#page-bideval .tab').forEach(function(t){ t.classList.remove('active'); });
-  document.querySelector('#page-bideval .tab').classList.add('active');
+  var firstTab = document.querySelector('#page-bideval .tab'); if (firstTab) firstTab.classList.add('active');
   ['tab-compare','tab-scorecard','tab-recommendation'].forEach(function(id){
-    var el = document.getElementById(id);
-    if (el) el.style.display = id === 'tab-compare' ? 'block' : 'none';
+    var el = document.getElementById(id); if (el) el.style.display = id==='tab-compare'?'block':'none';
   });
+}
+
+// FIX 4: Award letter — fully resets modal for every RFQ
+function openAwardFromBidEvalFor(rfqNum) {
+  var allKnown = (_activeRFQs||[]).concat(_rfqHistory||[]);
+  var rfqEntry = allKnown.find(function(r){ return r.num === rfqNum; });
+  var rfqItem = rfqEntry ? rfqEntry.item : rfqNum;
+  // Populate vendor dropdown from tracker quotes
+  var vendorSel = document.getElementById('close-rfq-awarded-vendor');
+  if (vendorSel) {
+    vendorSel.innerHTML = '<option value="">— Select vendor —</option>';
+    var responses = (window._trackerRFQMap || {})[rfqNum] || [];
+    var sorted = responses.slice().sort(function(a,b){
+      return (parseFloat((a[3]||'0').replace(/[^\d.]/g,''))||0) - (parseFloat((b[3]||'0').replace(/[^\d.]/g,''))||0);
+    });
+    sorted.forEach(function(row) {
+      var vName = row[1] || row[2] || 'Unknown';
+      var dbV = VENDOR_DATA.find(function(v){ return v['Email']===(row[2]||''); });
+      if (dbV) vName = dbV['Vendor Name'];
+      var price = (row[3]||'').replace(/\[.*?\]/g,'').trim();
+      var uom = row[4]||'';
+      var opt = document.createElement('option');
+      opt.value = vName;
+      opt.text = vName + (price ? ' — ₹'+price+(uom?' / '+uom:'') : '');
+      vendorSel.appendChild(opt);
+    });
+  }
+  var overlay = document.getElementById('close-rfq-overlay');
+  document.getElementById('close-rfq-num').textContent = rfqNum;
+  document.getElementById('close-rfq-item').textContent = rfqItem && rfqItem !== rfqNum ? rfqItem : rfqNum;
+  document.getElementById('close-rfq-po-number').value = '';
+  document.getElementById('close-rfq-followed-rec').value = 'yes';
+  document.getElementById('close-rfq-reason').value = '';
+  document.getElementById('close-rfq-reason-group').style.display = 'none';
+  overlay.dataset.rfqNum = rfqNum;
+  overlay.style.display = 'flex';
+}
+
+function openAwardFromBidEval() {
+  var sel = document.getElementById('bideval-rfq-select');
+  var rfqId = sel && sel.value ? sel.value : '';
+  if (!rfqId) { alert('Please select an RFQ first.'); return; }
+  openAwardFromBidEvalFor(rfqId);
 }
 
 function exportBidEval(rfqNum) {
@@ -3197,19 +3354,7 @@ function updateBidEvalRFQ(rfqId) {
   if (sel) sel.value = rfqId;
 }
 
-function addRFQToBidEvalDropdown(rfqId, rfqLabel) {
-  var sel = document.getElementById('bideval-rfq-select');
-  if (!sel) return;
-  // Check if already exists
-  for (var i=0; i<sel.options.length; i++) {
-    if (sel.options[i].value === rfqId) return;
-  }
-  var opt = document.createElement('option');
-  opt.value = rfqId;
-  opt.text = rfqLabel;
-  sel.appendChild(opt);
-  _bidevAlRFQs.push({id: rfqId, label: rfqLabel});
-}
+// addRFQToBidEvalDropdown handled by populateBidEvalDropdown
 
 // ── RFQ History & Close the Loop ─────────────────────────────────────────────
 var _rfqSelectionMode = false;
@@ -3568,7 +3713,9 @@ function toggleFloatBtn(visible) {
       </div>
       <div class="form-group">
         <label class="form-label">Awarded Vendor *</label>
-        <input class="form-input" id="close-rfq-awarded-vendor" placeholder="e.g. MediPack Solutions">
+        <select class="form-select" id="close-rfq-awarded-vendor">
+          <option value="">— Select vendor —</option>
+        </select>
       </div>
       <div class="form-group">
         <label class="form-label">PO Number (if raised)</label>
