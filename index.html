@@ -2161,6 +2161,10 @@ async function loadQuoteTracker() {
     });
     window._sheetItemMap = sheetItemMap;
     renderTrackerFromCache();
+  } catch(e) {
+    if (body) body.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text3);font-size:12px;">Unable to load. Check connection.</div>';
+    if (status) { status.textContent = 'Error'; status.style.color = 'var(--red)'; }
+  }
 }
 
 // Central helper — RFQ is closed if in local history OR flagged in sheet
@@ -2172,11 +2176,6 @@ function isClosedRFQ(rfqNum) {
 
 function getClosedRFQEntry(rfqNum) {
   return (_rfqHistory||[]).find(function(r){ return r.num === rfqNum; }) || null;
-}
-  } catch(e) {
-    if (body) body.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text3);font-size:12px;">Unable to load. Check connection.</div>';
-    if (status) { status.textContent = 'Error'; status.style.color = 'var(--red)'; }
-  }
 }
 
 function renderTrackerFromCache() {
