@@ -1677,7 +1677,6 @@ function showApp(page) {
   document.getElementById('app').style.display = 'block';
   showPage(page || 'dashboard');
   renderActiveRFQs();
-  populateBidEvalDropdown();
   toggleFloatBtn(true);
 }
 
@@ -1700,7 +1699,7 @@ function showPage(name) {
     }
   });
   if (name === 'rfq') renderActiveRFQs();
-  if (name === 'bideval') populateBidEvalDropdown();
+  if (name === 'bideval' && !window._skipBidevalPopulate) populateBidEvalDropdown();
   window.scrollTo(0, 0);
 }
 
@@ -2163,8 +2162,10 @@ async function loadQuoteTracker() {
     });
     window._sheetItemMap = sheetItemMap;
     renderTrackerFromCache();
-    // Also refresh bid eval dropdown now that sheet data is available
-    populateBidEvalDropdown();
+    // Silently refresh bid eval dropdown options (don't change current selection or re-evaluate)
+    var currentRFQ = document.getElementById('bideval-rfq-select');
+    var currentVal = currentRFQ ? currentRFQ.value : '';
+    populateBidEvalDropdown(null, currentVal || null);
   } catch(e) {
     if (body) body.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text3);font-size:12px;">Unable to load. Check connection.</div>';
     if (status) { status.textContent = 'Error'; status.style.color = 'var(--red)'; }
@@ -3151,11 +3152,13 @@ function populateBidEvalDropdown(filterProduct, selectRFQ) {
     opt.text = rfq.num + (itemLabel ? ' · ' + itemLabel.substring(0,25) : '') + closedTag;
     sel.appendChild(opt);
   });
-  // Set selection: explicit selectRFQ wins, then restored prev, then first option
-  if (selectRFQ) {
+  // Set selection only — never auto-evaluate, user must explicitly pick
+  if (selectRFQ && sel.querySelector('option[value="'+selectRFQ+'"]')) {
     sel.value = selectRFQ;
   } else if (prev && sel.querySelector('option[value="'+prev+'"]')) {
     sel.value = prev;
+  } else {
+    sel.selectedIndex = 0; // Stay on "— Select RFQ —"
   }
 }
 
@@ -3178,11 +3181,16 @@ function addRFQToBidEvalDropdown(rfqId, rfqLabel) {
 }
 
 function evaluateRFQ(rfqNum) {
+  if (!rfqNum) return;
   // Only call showPage if not already on bideval
   var cur = document.querySelector('.page.active');
-  if (!cur || cur.id !== 'page-bideval') showPage('bideval');
+  if (!cur || cur.id !== 'page-bideval') {
+    window._skipBidevalPopulate = true; // prevent showPage from resetting dropdown
+    showPage('bideval');
+    window._skipBidevalPopulate = false;
+  }
 
-  // Populate dropdown and set value atomically — pass rfqNum to pre-select it
+  // Populate dropdown and set value atomically
   populateBidEvalDropdown(null, rfqNum);
 
   // Check if closed — use central helper (checks both localStorage AND sheet)
