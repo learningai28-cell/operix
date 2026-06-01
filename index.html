@@ -1795,6 +1795,8 @@ function renderScorecardTab(rfqNum) {
 function renderScorecardTabFromEval(rfqNum) {
   renderScorecardTab(rfqNum);
 }
+
+function generateRFQ() {
   const item = document.getElementById('rfq-item').value || 'Corrugated boxes 40x30x20 cm';
   const qty  = document.getElementById('rfq-qty').value  || '50,000 units';
   const spec = document.getElementById('rfq-spec').value || 'Standard double-wall corrugated, burst strength 14kg/cm2';
