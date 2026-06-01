@@ -2521,54 +2521,6 @@ function saveContractRenewal() {
 
 
 
-function showVendorDetail(vid) {
-  var v = VENDOR_DATA.find(function(x){ return x['Vendor ID']===vid; });
-  var sc = SCORECARD_DATA.find(function(x){ return x['Vendor ID']===vid; });
-  var ct = CONTRACT_DATA.find(function(x){ return x['Vendor ID']===vid; });
-  if (!v) return;
-  var score = parseInt(v['Vendor Score'])||0;
-  var grade = v['Performance Grade']||'?';
-  var gradeColor = grade==='A'?'var(--em)':grade==='B'?'var(--amber)':grade==='C'?'var(--red)':'var(--text3)';
-  var body = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;">' +
-    '<div style="background:var(--bg3);border-radius:var(--r);padding:12px;">' +
-    '<div style="font-size:11px;color:var(--text3);margin-bottom:6px;">VENDOR DETAILS</div>' +
-    '<div style="font-size:13px;font-weight:500;">' + v['Vendor Name'] + '</div>' +
-    '<div style="font-size:12px;color:var(--text2);margin-top:4px;">&#128231; ' + (v['Email']||'') + '</div>' +
-    '<div style="font-size:12px;color:var(--text2);">&#128222; ' + (v['Phone']||'') + '</div>' +
-    '<div style="font-size:12px;color:var(--text2);">&#128205; ' + (v['City']||'') + ', ' + (v['State']||'') + '</div>' +
-    '</div>' +
-    '<div style="background:var(--bg3);border-radius:var(--r);padding:12px;">' +
-    '<div style="font-size:11px;color:var(--text3);margin-bottom:6px;">SCORE</div>' +
-    '<div style="font-size:32px;font-weight:700;color:' + gradeColor + ';font-family:var(--font-d);">' + (score>0?score:'-') + '</div>' +
-    '<div style="font-size:12px;color:var(--text3);">Grade <strong style="color:' + gradeColor + ';">' + grade + '</strong></div>' +
-    (sc ? '<div style="font-size:11px;color:var(--text3);margin-top:6px;">OTIF: ' + (sc['OTIF %']||'—') + '% &nbsp;|&nbsp; Issues: ' + (sc['Issues Raised']||'0') + '</div>' : '') +
-    '</div></div>';
-  if (ct) {
-    var days = ct['Days to Expiry'];
-    var dc = days<=30?'var(--amber)':'var(--em)';
-    body += '<div style="background:var(--bg3);border-radius:var(--r);padding:12px;margin-bottom:14px;">' +
-      '<div style="font-size:11px;color:var(--text3);margin-bottom:6px;">CONTRACT</div>' +
-      '<div style="display:flex;justify-content:space-between;">' +
-      '<div><div style="font-size:13px;font-weight:500;">' + ct['Contract Type'] + '</div>' +
-      '<div style="font-size:12px;color:var(--text2);">Expires: ' + ct['End Date'] + '</div></div>' +
-      '<div style="text-align:right;"><div style="font-size:22px;font-weight:700;color:' + dc + ';">' + days + '</div>' +
-      '<div style="font-size:11px;color:var(--text3);">days left</div></div></div>' +
-      (days<=30?'<div style="margin-top:8px;font-size:12px;color:var(--amber);">&#9888;&#65039; Expiring soon &#8212; initiate renewal</div>':'') +
-      '</div>';
-  }
-  body += '<div style="background:var(--bg3);border-radius:var(--r);padding:12px;margin-bottom:14px;">' +
-    '<div style="font-size:11px;color:var(--text3);margin-bottom:6px;">NOTES</div>' +
-    '<div style="font-size:12px;color:var(--text2);line-height:1.6;">' + (v['Notes']||'No notes.') + '</div></div>';
-  // Edit button row
-  body += '<div style="display:flex;gap:10px;">' +
-    '<button class="btn-secondary" style="flex:1;font-size:12px;" onclick="closeContractModal();openEditVendorModal(\'' + vid + '\')">&#9998; Edit vendor details</button>' +
-    (ct && ct['Drive Link'] ? '<button class="btn-secondary" style="font-size:12px;" onclick="window.open(\'' + ct['Drive Link'] + '\',\'_blank\')">&#128196; View contract</button>' : '') +
-    '</div>';
-  document.getElementById('modal-contract-title').textContent = v['Vendor Name'];
-  document.getElementById('modal-contract-body').innerHTML = body;
-  document.getElementById('contract-detail-overlay').style.display = 'flex';
-}
-
 // ── Edit Vendor Modal ────────────────────────────────────────────────────────
 function openEditVendorModal(vid) {
   var v = VENDOR_DATA.find(function(x){ return x['Vendor ID']===vid; });
@@ -3397,13 +3349,6 @@ function openAwardFromBidEvalFor(rfqNum) {
   overlay.style.display = 'flex';
 }
 
-function openAwardFromBidEval() {
-  var sel = document.getElementById('bideval-rfq-select');
-  var rfqId = sel && sel.value ? sel.value : '';
-  if (!rfqId) { alert('Please select an RFQ first.'); return; }
-  openAwardFromBidEvalFor(rfqId);
-}
-
 function exportBidEval(rfqNum) {
   // Simple CSV export of the bid eval data
   var rfqMap = window._trackerRFQMap || {};
@@ -3424,12 +3369,6 @@ function exportBidEval(rfqNum) {
   a.click();
 }
 
-
-function updateBidEvalRFQ(rfqId) {
-  // Update the displayed RFQ badge/label wherever needed
-  var sel = document.getElementById('bideval-rfq-select');
-  if (sel) sel.value = rfqId;
-}
 
 // addRFQToBidEvalDropdown handled by populateBidEvalDropdown
 
