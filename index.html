@@ -1577,7 +1577,8 @@ nav {
           <div class="page-title">Vendor Database</div>
           <div class="page-sub">All vendors — scores, contract status, and category filters.</div>
         </div>
-        <div style="display:flex;gap:10px;align-items:center;">
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+          <input type="text" id="vendor-search" class="form-input" placeholder="🔍 Search vendors..." style="width:180px;font-size:13px;padding:6px 12px;" oninput="renderVendors()">
           <select id="vendor-cat-filter" class="form-select" style="width:150px;font-size:13px;" onchange="renderVendors()">
             <option value="All">All categories</option>
             <option value="Packaging">Packaging</option>
@@ -2723,13 +2724,21 @@ function viewContractDetail(cid) {
 function renderVendors() {
   var catF = (document.getElementById('vendor-cat-filter')||{value:'All'}).value;
   var stF  = (document.getElementById('vendor-status-filter')||{value:'All'}).value;
+  var searchEl = document.getElementById('vendor-search');
+  var searchQ  = searchEl ? searchEl.value.toLowerCase().trim() : '';
   var grid = document.getElementById('vendor-grid');
   if (!grid) return;
 
   var filtered = VENDOR_DATA.filter(function(v) {
     var catOk = catF === 'All' || v['Category'] === catF;
     var stOk  = stF === 'All' || v['Onboarded'] === stF;
-    return catOk && stOk;
+    var searchOk = !searchQ ||
+      (v['Vendor Name']||'').toLowerCase().includes(searchQ) ||
+      (v['Category']||'').toLowerCase().includes(searchQ) ||
+      (v['City']||'').toLowerCase().includes(searchQ) ||
+      (v['Email']||'').toLowerCase().includes(searchQ) ||
+      (v['Vendor ID']||'').toLowerCase().includes(searchQ);
+    return catOk && stOk && searchOk;
   });
 
   // Update KPIs
