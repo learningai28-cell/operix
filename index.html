@@ -1625,11 +1625,9 @@ nav {
         <div class="kpi"><div class="kpi-label">Onboarded</div><div class="kpi-value" id="vkpi-onboarded" style="color:var(--em);">—</div><div class="kpi-delta up">Active</div></div>
         <div class="kpi"><div class="kpi-label">Avg score</div><div class="kpi-value" id="vkpi-avg">—</div><div class="kpi-delta neutral">All onboarded</div></div>
         <div class="kpi"><div class="kpi-label">Grade A vendors</div><div class="kpi-value" id="vkpi-gradeA" style="color:var(--em);">—</div><div class="kpi-delta up">Score ≥ 85</div></div>
-      </div>
-
       <!-- Vendor cards grid -->
       <div id="vendor-grid" class="fade-up-3" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px;"></div>
-    </div>
+    </div><!-- /page-scorecard -->
 
 
   </div><!-- /main -->
@@ -1710,9 +1708,93 @@ function switchTab(btn, tabId) {
     const el = document.getElementById(id);
     if (el) el.style.display = id === tabId ? 'block' : 'none';
   });
+  // Render scorecard when that tab is opened
+  if (tabId === 'tab-scorecard') {
+    var sel = document.getElementById('bideval-rfq-select');
+    var rfqNum = sel ? sel.value : '';
+    renderScorecardTab(rfqNum);
+  }
 }
 
-function generateRFQ() {
+function renderScorecardTab(rfqNum) {
+  var el = document.getElementById('tab-scorecard');
+  if (!el) return;
+  if (!rfqNum) {
+    el.innerHTML = '<div class="card"><div class="card-header"><div class="card-title">Scorecard breakdown</div></div>' +
+      '<div style="text-align:center;padding:48px 24px;"><div style="font-size:36px;margin-bottom:12px;">📊</div>' +
+      '<div style="font-size:14px;font-weight:600;color:var(--text);">No RFQ selected</div>' +
+      '<div style="font-size:13px;color:var(--text3);margin-top:8px;">Select an RFQ from the dropdown to see scorecard breakdown.</div>' +
+      '</div></div>';
+    return;
+  }
+  var responses = (window._trackerRFQMap || {})[rfqNum] || [];
+  if (!responses.length) {
+    el.innerHTML = '<div class="card"><div class="card-header"><div class="card-title">Scorecard breakdown</div></div>' +
+      '<div style="text-align:center;padding:48px 24px;"><div style="font-size:36px;margin-bottom:12px;">📊</div>' +
+      '<div style="font-size:14px;font-weight:600;color:var(--text);">No scorecards generated yet</div>' +
+      '<div style="font-size:13px;color:var(--text3);margin-top:8px;">Vendor scorecards will appear here once quotes are received and evaluated for an active RFQ.</div>' +
+      '</div></div>';
+    return;
+  }
+
+  var html = '<div class="card"><div class="card-header"><div class="card-title">Scorecard breakdown — ' + rfqNum + '</div></div>' +
+    '<div style="display:flex;flex-direction:column;gap:12px;padding:16px;">';
+
+  responses.forEach(function(row) {
+    var vName = row[1] || row[2] || 'Unknown';
+    var vEmail = row[2] || '';
+    var dbV = VENDOR_DATA.find(function(v){ return v['Email'] === vEmail; });
+    if (dbV) vName = dbV['Vendor Name'];
+
+    var price = parseFloat((row[3]||'0').replace(/[^\d.]/g,'')) || 0;
+    var lead = parseFloat((row[5]||'0').replace(/[^\d.]/g,'')) || 0;
+    var pay = (row[6]||'').trim();
+    var spec = (row[7]||'').trim();
+
+    // Score each dimension out of 25
+    var priceScore = price > 0 ? Math.min(25, Math.round(25 * (1 - Math.min(price/500, 0.9)))) : 10;
+    var leadScore = lead > 0 ? Math.min(25, Math.round(25 * Math.max(0, 1 - lead/30))) : 10;
+    var payScore = pay.includes('Net 30') ? 20 : pay.includes('Net 45') ? 18 : pay.includes('Net 15') ? 23 : pay.includes('Advance') ? 10 : 15;
+    var specScore = spec === 'Full' ? 25 : spec === 'Partial' ? 15 : spec.toLowerCase().includes('non') ? 5 : 12;
+    var total = priceScore + leadScore + payScore + specScore;
+
+    var grade = total >= 80 ? 'A' : total >= 65 ? 'B' : total >= 50 ? 'C' : 'D';
+    var gradeColor = grade === 'A' ? 'var(--em)' : grade === 'B' ? 'var(--amber)' : 'var(--red)';
+
+    html += '<div style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--r2);padding:16px;">';
+    html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">';
+    html += '<div><div style="font-size:14px;font-weight:600;">' + vName + '</div>';
+    html += '<div style="font-size:11px;color:var(--text3);">' + vEmail + '</div></div>';
+    html += '<div style="text-align:right;"><div style="font-size:22px;font-weight:700;color:' + gradeColor + ';">' + total + '/100</div>';
+    html += '<div style="font-size:12px;color:' + gradeColor + ';font-weight:600;">Grade ' + grade + '</div></div></div>';
+
+    // Score bars
+    var dims = [
+      {label:'Price competitiveness', score:priceScore, max:25},
+      {label:'Lead time', score:leadScore, max:25},
+      {label:'Payment terms', score:payScore, max:25},
+      {label:'Spec compliance', score:specScore, max:25}
+    ];
+    dims.forEach(function(d) {
+      var pct = Math.round((d.score/d.max)*100);
+      var barColor = pct >= 80 ? 'var(--em)' : pct >= 60 ? 'var(--amber)' : 'var(--red)';
+      html += '<div style="margin-bottom:8px;">';
+      html += '<div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px;">';
+      html += '<span style="color:var(--text2);">' + d.label + '</span>';
+      html += '<span style="color:var(--text);font-family:var(--font-m);">' + d.score + '/' + d.max + '</span></div>';
+      html += '<div style="background:var(--bg4);border-radius:4px;height:6px;overflow:hidden;">';
+      html += '<div style="width:' + pct + '%;height:100%;background:' + barColor + ';border-radius:4px;transition:.4s;"></div></div></div>';
+    });
+    html += '</div>';
+  });
+
+  html += '</div></div>';
+  el.innerHTML = html;
+}
+
+function renderScorecardTabFromEval(rfqNum) {
+  renderScorecardTab(rfqNum);
+}
   const item = document.getElementById('rfq-item').value || 'Corrugated boxes 40x30x20 cm';
   const qty  = document.getElementById('rfq-qty').value  || '50,000 units';
   const spec = document.getElementById('rfq-spec').value || 'Standard double-wall corrugated, burst strength 14kg/cm2';
@@ -3341,6 +3423,8 @@ function evaluateRFQ(rfqNum) {
   ['tab-compare','tab-scorecard','tab-recommendation'].forEach(function(id){
     var el = document.getElementById(id); if (el) el.style.display = id==='tab-compare'?'block':'none';
   });
+  // Pre-render scorecard so it's ready when user clicks that tab
+  renderScorecardTab(rfqNum);
 }
 
 // FIX 4: Award letter — fully resets modal for every RFQ
