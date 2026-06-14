@@ -2646,6 +2646,17 @@ function saveContractRenewal() {
 
 
 // ── Edit Vendor Modal ────────────────────────────────────────────────────────
+function deleteVendor(vid, vname) {
+  if (!confirm('Delete ' + vname + '?\n\nThis cannot be undone.')) return;
+  var idx = VENDOR_DATA.findIndex(function(v){ return v['Vendor ID'] === vid; });
+  if (idx > -1) {
+    VENDOR_DATA.splice(idx, 1);
+    persistData();
+    renderVendors();
+    showToast(vname + ' removed from vendor database.');
+  }
+}
+
 function openEditVendorModal(vid) {
   var v = VENDOR_DATA.find(function(x){ return x['Vendor ID']===vid; });
   if (!v) return;
@@ -2816,7 +2827,10 @@ function renderVendors() {
           '<span>&#128231; ' + (v['Email']||'—') + '</span>' +
           '<span style="margin-left:12px;">&#8987; ' + (v['Lead Time (days)']||'—') + ' days</span>' +
         '</div>' +
-        (!_rfqSelectionMode ? '<button onclick="event.stopPropagation();closeContractModal();openEditVendorModal(\'' + v['Vendor ID'] + '\')" style="font-size:11px;padding:3px 10px;background:var(--bg4);border:1px solid var(--border2);border-radius:var(--r);color:var(--text2);cursor:pointer;">&#9998; Edit</button>' : '') +
+        (!_rfqSelectionMode ? '<div style="display:flex;gap:6px;margin-top:4px;">' +
+          '<button onclick="event.stopPropagation();closeContractModal();openEditVendorModal(\'' + v['Vendor ID'] + '\')" style="font-size:11px;padding:3px 10px;background:var(--bg4);border:1px solid var(--border2);border-radius:var(--r);color:var(--text2);cursor:pointer;">&#9998; Edit</button>' +
+          '<button onclick="event.stopPropagation();deleteVendor(\'' + v['Vendor ID'] + '\',\'' + (v['Vendor Name']||'').replace(/'/g,"\\'") + '\')" style="font-size:11px;padding:3px 10px;background:var(--bg4);border:1px solid var(--red);border-radius:var(--r);color:var(--red);cursor:pointer;">&#128465; Delete</button>' +
+          '</div>' : '') +
         '</div>' +
       '</div>' +
     '</div>';
